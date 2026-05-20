@@ -1,0 +1,117 @@
+---
+import type { CollectionEntry } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import ArticleCta from './ArticleCta.astro';
+import { formatTag, getAllTags, getTagHref } from '../lib/blog';
+
+interface Props {
+  posts: CollectionEntry<'blog'>[];
+  currentPage: number;
+  totalPages: number;
+  startIndex: number;
+  heading?: string;
+  eyebrow?: string;
+  intro?: string;
+  allPosts?: CollectionEntry<'blog'>[];
+}
+
+const { posts, currentPage, totalPages, startIndex, allPosts = posts } = Astro.props;
+const heading = Astro.props.heading ?? 'Research Log';
+const eyebrow = Astro.props.eyebrow ?? 'ResearchZero Blog';
+const intro = Astro.props.intro ?? 'Technical notes on smart contract security, tokenized assets, custody, settlement, DeFi, and institutional on-chain finance.';
+const isDefaultIndex = heading === 'Research Log';
+const title = isDefaultIndex
+  ? (currentPage === 1 ? 'ResearchZero Blog | Blockchain Security Research' : `ResearchZero Blog | Page ${currentPage}`)
+  : `${heading} | ResearchZero Blog`;
+const description = isDefaultIndex
+  ? 'Research notes on smart contract security, tokenized assets, DeFi, custody, settlement, and institutional on-chain finance.'
+  : intro;
+const base = import.meta.env.BASE_URL;
+const previousHref = currentPage === 2 ? base : `${base}page/${currentPage - 1}/`;
+const nextHref = `${base}page/${currentPage + 1}/`;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url);
+const allTags = getAllTags(allPosts);
+const listSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: heading,
+  description,
+  url: canonical.href,
+  mainEntity: {
+    '@type': 'ItemList',
+    itemListElement: posts.map((post, index) => ({
+      '@type': 'ListItem',
+      position: startIndex + index + 1,
+      url: new URL(`${base}blog/${post.slug}/`, Astro.site ?? Astro.url).href,
+      name: post.data.title
+    }))
+  }
+};
+const prevUrl = currentPage > 1 ? new URL(previousHref, Astro.site ?? Astro.url).href : undefined;
+const nextUrl = currentPage < totalPages ? new URL(nextHref, Astro.site ?? Astro.url).href : undefined;
+---
+
+<BaseLayout title={title} description={description} keywords={allTags.map(formatTag)} structuredData={listSchema} prevUrl={prevUrl} nextUrl={nextUrl}>
+  <section class="blog-index">
+    <div class="data-stream"></div>
+    <div class="data-stream"></div>
+    <div class="container">
+      <div class="blog-index-header">
+        <div>
+          <p class="section-eyebrow">{eyebrow}</p>
+          <h1>{heading}</h1>
+        </div>
+        <p>{intro}</p>
+      </div>
+      {allTags.length > 0 && (
+        <nav class="topic-nav" aria-label="Research topics">
+          {allTags.map((tag) => <a href={getTagHref(tag)}>{formatTag(tag)}</a>)}
+        </nav>
+      )}
+      <ArticleCta />
+      <div class="post-grid">
+        {posts.map((post: CollectionEntry<'blog'>, index: number) => (
+          <article class="post-card">
+            <span class="post-index">{String(startIndex + index + 1).padStart(2, '0')}</span>
+            <div>
+              <time datetime={post.data.date.toISOString()}>
+                {post.data.date.toLocaleDateString('en', { year: 'numeric', month: 'short', day: 'numeric' })}
+              </time>
+              <h3><a href={`${base}blog/${post.slug}/`}>{post.data.title}</a></h3>
+              <p>{post.data.description}</p>
+              <div class="tag-row">
+                {post.data.tags.map((tag: string) => <a class="tag" href={getTagHref(tag)}>{tag}</a>)}
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+      {totalPages > 1 && (
+        <nav class="pagination" aria-label="Blog pagination">
+          <div class="pagination-status">
+            Page {currentPage} / {totalPages}
+          </div>
+          <div class="pagination-actions">
+            {currentPage > 1 ? (
+              <a class="pagination-link" href={previousHref}>Previous</a>
+            ) : (
+              <span class="pagination-link disabled">Previous</span>
+            )}
+            {Array.from({ length: totalPages }, (_, index) => {
+              const page = index + 1;
+              const href = page === 1 ? base : `${base}page/${page}/`;
+              return page === currentPage
+                ? <span class="pagination-number active">{page}</span>
+                : <a class="pagination-number" href={href}>{page}</a>;
+            })}
+            {currentPage < totalPages ? (
+              <a class="pagination-link" href={nextHref}>Next</a>
+            ) : (
+              <span class="pagination-link disabled">Next</span>
+            )}
+          </div>
+        </nav>
+      )}
+    </div>
+  </section>
+</BaseLayout>

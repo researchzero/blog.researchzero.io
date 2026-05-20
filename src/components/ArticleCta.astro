@@ -1,0 +1,23 @@
+---
+interface Props {
+  variant?: 'inline' | 'final';
+}
+
+const { variant = 'inline' } = Astro.props;
+const isFinal = variant === 'final';
+---
+
+<aside class:list={['article-cta', { 'article-cta-final': isFinal }]}>
+  <div>
+    <p class="article-cta-eyebrow">{isFinal ? 'Next step' : 'Audit checklist'}</p>
+    <h2>{isFinal ? 'Need a security review before launch?' : 'Review the controls before production capital is exposed.'}</h2>
+    <p>
+      Use the tokenized asset security checklist to evaluate issuer authority, settlement logic,
+      custody permissions, emergency controls, and upgrade risk before mainnet deployment.
+    </p>
+  </div>
+  <div class="article-cta-actions">
+    <a class="article-cta-primary" href="/tokenized-asset-security-checklist/">Open checklist</a>
+    <a class="article-cta-secondary" href="mailto:contact@researchzero.io?subject=Tokenized%20asset%20security%20review">Request review</a>
+  </div>
+</aside>

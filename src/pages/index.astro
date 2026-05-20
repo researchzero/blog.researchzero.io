@@ -1,0 +1,10 @@
+---
+import BlogIndexPage from '../components/BlogIndexPage.astro';
+import { getSortedBlogPosts, POSTS_PER_PAGE } from '../lib/blog';
+
+const allPosts = await getSortedBlogPosts();
+const posts = allPosts.slice(0, POSTS_PER_PAGE);
+const totalPages = Math.ceil(allPosts.length / POSTS_PER_PAGE);
+---
+
+<BlogIndexPage posts={posts} allPosts={allPosts} currentPage={1} totalPages={totalPages} startIndex={0} />

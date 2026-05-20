@@ -1,0 +1,32 @@
+---
+import BlogIndexPage from '../../components/BlogIndexPage.astro';
+import { formatTag, getAllTags, getPostsByTag, getSortedBlogPosts, slugifyTag } from '../../lib/blog';
+
+export async function getStaticPaths() {
+  const allPosts = await getSortedBlogPosts();
+  const tags = getAllTags(allPosts);
+
+  return tags.map((tag) => {
+    const posts = getPostsByTag(allPosts, tag);
+    return {
+      params: { tag: slugifyTag(tag) },
+      props: { tag, posts, allPosts }
+    };
+  });
+}
+
+const { tag, posts, allPosts } = Astro.props;
+const label = formatTag(tag);
+const intro = `ResearchZero technical notes on ${label.toLowerCase()} for smart contracts, tokenized securities, settlement systems, and institutional on-chain finance.`;
+---
+
+<BlogIndexPage
+  posts={posts}
+  allPosts={allPosts}
+  currentPage={1}
+  totalPages={1}
+  startIndex={0}
+  eyebrow="Research Topic"
+  heading={`${label} Research`}
+  intro={intro}
+/>

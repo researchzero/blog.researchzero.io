@@ -1,0 +1,188 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+  type?: 'website' | 'article';
+  keywords?: string[];
+  structuredData?: Record<string, unknown> | Record<string, unknown>[];
+  prevUrl?: string;
+  nextUrl?: string;
+}
+
+const { title, description, type = 'website', keywords = [], structuredData = [], prevUrl, nextUrl } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url);
+const baseUrl = new URL(import.meta.env.BASE_URL, Astro.site ?? Astro.url);
+const structuredDataItems = Array.isArray(structuredData) ? structuredData : [structuredData];
+const siteSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: 'ResearchZero Blog',
+  url: baseUrl.href,
+  publisher: {
+    '@type': 'Organization',
+    name: 'ResearchZero',
+    url: 'https://researchzero.io/',
+    email: 'contact@researchzero.io'
+  }
+};
+const schema = [siteSchema, ...structuredDataItems].filter((item) => Object.keys(item).length > 0);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    {keywords.length > 0 && <meta name="keywords" content={keywords.join(', ')} />}
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <link rel="canonical" href={canonical} />
+    {prevUrl && <link rel="prev" href={prevUrl} />}
+    {nextUrl && <link rel="next" href={nextUrl} />}
+    <link rel="sitemap" href={new URL('sitemap.xml', baseUrl)} />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-soft-32x32.png" />
+    <link rel="shortcut icon" href="/favicon-soft-32x32.png" />
+    <meta name="theme-color" content="#b91c1c" />
+    <meta name="author" content="ResearchZero" />
+    <meta property="og:type" content={type} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:site_name" content="ResearchZero" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <script is:inline type="application/ld+json" set:html={JSON.stringify(schema)} />
+  </head>
+  <body>
+    <div class="scanlines" aria-hidden="true"></div>
+    <div class="noise-overlay" aria-hidden="true"></div>
+    <header>
+      <nav class="nav" aria-label="Main navigation">
+      <div class="container">
+        <a href="https://researchzero.io/" class="nav-logo" aria-label="ResearchZero home">
+          <span class="logo-research">RESEARCH</span><span class="logo-zero">ZERO</span>
+        </a>
+        <ul class="nav-links">
+          <li><a href="https://researchzero.io/#services" class="nav-link">Services</a></li>
+          <li><a href="https://researchzero.io/#supported-chains" class="nav-link">Chains</a></li>
+          <li><a href="https://researchzero.io/#why-us" class="nav-link">Why Us</a></li>
+          <li><a href="https://researchzero.io/#process" class="nav-link">Process</a></li>
+          <li><a href="https://blog.researchzero.io/" class="nav-link">Blog</a></li>
+        </ul>
+        <div class="nav-right">
+          <a href="https://researchzero.io/#contact" class="nav-cta-btn">
+            Request Security Review
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
+          </a>
+        </div>
+        <button class="nav-hamburger" aria-label="Toggle menu" aria-expanded="false">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+      </nav>
+    </header>
+    <div class="nav-mobile" role="navigation" aria-label="Mobile navigation">
+      <a href="https://researchzero.io/#services">Services</a>
+      <a href="https://researchzero.io/#supported-chains">Chains</a>
+      <a href="https://researchzero.io/#why-us">Why Us</a>
+      <a href="https://researchzero.io/#process">Process</a>
+      <a href="https://blog.researchzero.io/">Blog</a>
+      <a href="https://researchzero.io/#contact" class="nav-cta-btn">Request Security Review</a>
+    </div>
+    <main>
+      <slot />
+    </main>
+    <section class="cta" id="contact">
+      <div class="cta-bg-grid"></div>
+      <div class="container">
+        <div class="cta-content fade-in">
+          <span class="section-eyebrow">Get Started</span>
+          <h2 class="cta-title">Secure your<br />on-chain protocol</h2>
+          <p class="cta-subtitle">Talk to ResearchZero about your smart contracts, institutional DeFi protocol, tokenized asset system, stablecoin, bridge, custody wallet, or blockchain settlement infrastructure.</p>
+          <div class="cta-form">
+            <a class="cta-mail-link" href="mailto:contact@researchzero.io?subject=Security%20review%20request" aria-label="Email contact@researchzero.io">
+              <span>contact@researchzero.io</span>
+              <span class="cta-submit" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              </span>
+            </a>
+          </div>
+          <p class="cta-note">// Confidential scoping. Response within 24 hours.</p>
+        </div>
+      </div>
+    </section>
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-main">
+          <div class="footer-brand">
+            <a href="https://researchzero.io/#hero" class="nav-logo footer-logo">
+              <span class="logo-research">RESEARCH</span><span class="logo-zero">ZERO</span>
+            </a>
+            <p class="footer-tagline">Smart contract security for finance moving on-chain.</p>
+          </div>
+          <div class="footer-column">
+            <h4>Services</h4>
+            <ul>
+              <li><a href="https://researchzero.io/#services">Smart Contract Audits</a></li>
+              <li><a href="https://researchzero.io/#supported-chains">Supported Chains</a></li>
+              <li><a href="https://researchzero.io/#services">Institutional DeFi Security</a></li>
+              <li><a href="https://researchzero.io/#institutional-blockchain-security">Tokenized Asset Security</a></li>
+              <li><a href="https://researchzero.io/#services">Protocol &amp; Custody Infrastructure</a></li>
+            </ul>
+          </div>
+          <div class="footer-column">
+            <h4>Company</h4>
+            <ul>
+              <li><a href="https://researchzero.io/#why-us">About</a></li>
+              <li><a href="https://researchzero.io/#process">Process</a></li>
+              <li><a href="#contact">Contact</a></li>
+            </ul>
+          </div>
+          <div class="footer-column">
+            <h4>Connect</h4>
+            <div class="footer-social">
+              <a href="https://x.com/researchzeroio" aria-label="X" target="_blank" rel="noopener noreferrer">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+              </a>
+              <a href="https://github.com/researchzero" aria-label="GitHub" target="_blank" rel="noopener noreferrer">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+              </a>
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>&copy; 2026 ResearchZero. All rights reserved.</p>
+          <p>Smart contracts. Protocol security. On-chain finance.</p>
+        </div>
+      </div>
+    </footer>
+    <script>
+      const nav = document.querySelector('.nav');
+      const hamburger = document.querySelector('.nav-hamburger');
+      const mobileNav = document.querySelector('.nav-mobile');
+      const updateNav = () => nav?.classList.toggle('scrolled', window.scrollY > 12);
+      updateNav();
+      window.addEventListener('scroll', updateNav, { passive: true });
+      hamburger?.addEventListener('click', () => {
+        const isOpen = mobileNav?.classList.toggle('open') ?? false;
+        hamburger.classList.toggle('active', isOpen);
+        hamburger.setAttribute('aria-expanded', String(isOpen));
+        document.body.style.overflow = isOpen ? 'hidden' : '';
+      });
+      mobileNav?.querySelectorAll('a').forEach((link) => {
+        link.addEventListener('click', () => {
+          mobileNav.classList.remove('open');
+          hamburger?.classList.remove('active');
+          hamburger?.setAttribute('aria-expanded', 'false');
+          document.body.style.overflow = '';
+        });
+      });
+    </script>
+  </body>
+</html>

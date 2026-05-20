@@ -1,0 +1,116 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const title = 'Tokenized Asset Security Checklist | ResearchZero';
+const description = 'A practical checklist for reviewing tokenized asset smart contracts, issuer controls, settlement flows, custody permissions, emergency actions, and upgrade governance.';
+const checklistSections = [
+  {
+    title: 'Issuer Authority',
+    items: [
+      'Mint, burn, forced transfer, clawback, pause, and halt authority is isolated by role.',
+      'Critical role changes use a two-step handoff and emit clear operational events.',
+      'No single operational role can change compliance rules and move assets unilaterally.'
+    ]
+  },
+  {
+    title: 'Compliance Controls',
+    items: [
+      'Transfers enforce sender, recipient, and instrument eligibility before state changes.',
+      'Locks, freezes, hard walls, and soft walls have explicit precedence rules.',
+      'Restriction cleanup is deterministic and leaves an auditable trail.'
+    ]
+  },
+  {
+    title: 'Settlement Logic',
+    items: [
+      'Available balance is distinct from ledger balance and accounts for pending holds.',
+      'Batch settlement is idempotent and protected against duplicate processing.',
+      'External identifiers, references, and participant-agent flows cannot be replayed or misrouted.'
+    ]
+  },
+  {
+    title: 'Custody And Wallets',
+    items: [
+      'Registrant, custodian, broker, and wallet authority are modeled explicitly.',
+      'Custody permissions cannot bypass holder restrictions unless the legal workflow requires it.',
+      'Signing policies, multisig assumptions, and smart-account upgrade paths are reviewed.'
+    ]
+  },
+  {
+    title: 'Corporate Actions',
+    items: [
+      'Splits, reverse splits, adjustment factors, and fractionalization rules preserve accounting invariants.',
+      'Rounding behavior is documented and tested around edge balances.',
+      'Historical balances and event trails remain interpretable after adjustments.'
+    ]
+  },
+  {
+    title: 'Emergency And Upgrade Risk',
+    items: [
+      'Pause and halt controls are narrow, reversible, and tested against critical workflows.',
+      'Upgrade authority has delay, review, and rollback procedures appropriate for the asset class.',
+      'Monitoring covers privileged actions, failed settlement, oracle drift, and abnormal transfer patterns.'
+    ]
+  }
+];
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: 'Tokenized Asset Security Checklist',
+  description,
+  author: {
+    '@type': 'Organization',
+    name: 'ResearchZero',
+    url: 'https://researchzero.io/'
+  },
+  publisher: {
+    '@type': 'Organization',
+    name: 'ResearchZero',
+    url: 'https://researchzero.io/'
+  }
+};
+---
+
+<BaseLayout title={title} description={description} keywords={['tokenized asset security', 'smart contract audit', 'tokenized securities', 'settlement', 'custody']} structuredData={structuredData}>
+  <section class="lead-magnet">
+    <div class="data-stream"></div>
+    <div class="data-stream"></div>
+    <div class="container">
+      <header class="lead-magnet-header">
+        <a class="back-link" href={import.meta.env.BASE_URL}>&larr; All research</a>
+        <p class="section-eyebrow">Security Checklist</p>
+        <h1>Tokenized Asset Security Checklist</h1>
+        <p>
+          A practical control review for teams launching tokenized securities, funds, stablecoins,
+          settlement contracts, custody flows, or other regulated on-chain financial products.
+        </p>
+        <div class="lead-magnet-actions">
+          <a class="article-cta-primary" href="mailto:contact@researchzero.io?subject=Tokenized%20asset%20security%20review">Request security review</a>
+          <a class="article-cta-secondary" href="mailto:contact@researchzero.io?subject=Tokenized%20asset%20checklist%20discussion">Discuss checklist</a>
+        </div>
+      </header>
+
+      <div class="checklist-grid">
+        {checklistSections.map((section, index) => (
+          <article class="checklist-card">
+            <span class="checklist-index">{String(index + 1).padStart(2, '0')}</span>
+            <h2>{section.title}</h2>
+            <ul>
+              {section.items.map((item) => <li>{item}</li>)}
+            </ul>
+          </article>
+        ))}
+      </div>
+
+      <aside class="lead-magnet-footer">
+        <p class="article-cta-eyebrow">Review scope</p>
+        <h2>Turn this checklist into an audit scope.</h2>
+        <p>
+          Send the contracts, architecture notes, privileged roles, and launch timeline. ResearchZero
+          can convert this checklist into a scoped review for your tokenized asset system.
+        </p>
+        <a class="article-cta-primary" href="mailto:contact@researchzero.io?subject=Tokenized%20asset%20audit%20scope">Start scoping</a>
+      </aside>
+    </div>
+  </section>
+</BaseLayout>
