@@ -39,7 +39,7 @@ export async function GET({ site }: { site: URL }) {
       priority: '0.8'
     })),
     ...posts.map((post) => ({
-      loc: new URL(`blog/${post.slug}/`, base).href,
+      loc: new URL(`post/${post.slug}/`, base).href,
       lastmod: post.data.updated ?? post.data.date,
       changefreq: 'monthly',
       priority: '0.9'

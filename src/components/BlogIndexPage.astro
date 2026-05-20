@@ -42,7 +42,7 @@ const listSchema = {
     itemListElement: posts.map((post, index) => ({
       '@type': 'ListItem',
       position: startIndex + index + 1,
-      url: new URL(`${base}blog/${post.slug}/`, Astro.site ?? Astro.url).href,
+      url: new URL(`${base}post/${post.slug}/`, Astro.site ?? Astro.url).href,
       name: post.data.title
     }))
   }
@@ -77,7 +77,7 @@ const nextUrl = currentPage < totalPages ? new URL(nextHref, Astro.site ?? Astro
               <time datetime={post.data.date.toISOString()}>
                 {post.data.date.toLocaleDateString('en', { year: 'numeric', month: 'short', day: 'numeric' })}
               </time>
-              <h3><a href={`${base}blog/${post.slug}/`}>{post.data.title}</a></h3>
+              <h3><a href={`${base}post/${post.slug}/`}>{post.data.title}</a></h3>
               <p>{post.data.description}</p>
               <div class="tag-row">
                 {post.data.tags.map((tag: string) => <a class="tag" href={getTagHref(tag)}>{tag}</a>)}
