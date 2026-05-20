@@ -1,56 +1,124 @@
 ---
-title: "Try/Catch Is Not a General Failure Boundary in Solidity"
-description: "Solidity try/catch is narrower than general exception handling: it catches specific high-level external call failures, but not malformed success returndata or every failure around the call expression."
+title: "Solidity Try/Catch: What It Does and Does Not Catch"
+description: "Solidity try/catch catches some external call failures, but it is not a general exception handler. This article explains where the boundary is, with examples."
 date: 2026-05-20
 author: "ResearchZero"
 tags: ["solidity", "security", "auditing", "evm"]
 ---
 
-`try/catch` is one of those Solidity features that feels familiar enough to be dangerous. It borrows the shape of exception handling, but its boundary is much narrower than most developers expect.
+Solidity has a `try/catch` statement, but it does not behave like exception handling in JavaScript, Python, or Java.
 
-Solidity's `try/catch` looks like a familiar exception boundary, but the actual construct is narrower and more surprising. It is not "catch everything that goes wrong while calling this target". It is a compiler-lowered dispatch around a small set of expression kinds, with ABI decoding and catch-clause selection happening in very specific places.
+The most important thing to know is this:
 
-The first important rule is syntactic: `try` only accepts high-level external function calls, contract creation, and high-level library delegate calls. Raw low-level calls are rejected even though they are external EVM operations.
+`try/catch` in Solidity only catches failures from certain external operations. It does not catch every error that happens while evaluating the `try` statement, and it does not protect the caller from every bad response the callee can return.
 
-```solidity
-try other.f() returns (uint256 x) {
-    ...
-} catch {
-    ...
-}
+This article explains what Solidity `try/catch` catches, what it does not catch, and the common mistakes auditors should look for.
 
-try new Child() returns (Child c) {
-    ...
-} catch {
-    ...
-}
+## The short version
 
-try target.call(data) returns (bool ok, bytes memory ret) {
-    ...
-} catch {
-    ...
-}
-// compile error 2536
-```
+Solidity `try/catch` can be used with:
 
-The low-level call case is one of the easiest traps. `address.call`, `address.staticcall`, and `address.delegatecall` are all external EVM calls, but the compiler classifies them as `BareCall`, `BareStaticCall`, and `BareDelegateCall`. The try allowlist accepts `External`, `Creation`, and high-level library `DelegateCall`, not the bare variants. That means a refactor from `iface.f()` to `address(iface).call(...)` silently invalidates every surrounding `try`.
+1. High-level external function calls
+2. Contract creation with `new`
+3. High-level external library calls that compile to `delegatecall`
 
-The second rule is semantic: a successful call can still bypass the `catch`. If the CALL returns success but the returned bytes cannot be decoded as the return type declared by the caller, the ABI decoder reverts before the generated try/catch switch runs. The catch clauses never see it.
+It cannot be used directly with:
+
+1. `address.call`
+2. `address.staticcall`
+3. `address.delegatecall`
+4. Internal function calls
+
+It also does not catch every failure related to a high-level external call. In particular, if the external call succeeds but returns malformed data, the caller can revert while decoding the return value, and the `catch` block will not run.
+
+## Basic example of try/catch
+
+Here is the normal use case:
 
 ```solidity
-interface IFace {
-    function f() external returns (uint256);
-}
-
-contract ShortReturner {
-    fallback() external {
-        assembly { return(0, 0) }
-    }
+interface ITarget {
+    function mint() external returns (uint256);
 }
 
 contract Caller {
-    function probe(address t) external returns (uint256) {
-        try IFace(t).f() returns (uint256 x) {
+    function callMint(address target) external returns (uint256) {
+        try ITarget(target).mint() returns (uint256 id) {
+            return id;
+        } catch {
+            return 0;
+        }
+    }
+}
+```
+
+If `target.mint()` reverts, the `catch` block runs and the function returns `0`.
+
+This is the mental model most developers have:
+
+1. Try the external call.
+2. If the external call reverts, run the catch block.
+3. Otherwise, use the returned value.
+
+That model is useful, but incomplete.
+
+## 1. try/catch does not work with low-level calls
+
+The following code does not compile:
+
+```solidity
+contract Caller {
+    function callToken(address token, bytes calldata data) external {
+        try token.call(data) returns (bool ok, bytes memory ret) {
+            // ...
+        } catch {
+            // ...
+        }
+    }
+}
+```
+
+The reason is that `token.call(data)` is a low-level call. Solidity only allows `try` on a high-level external call, contract creation, or an external library call.
+
+For low-level calls, the error boundary is already expressed in the return values:
+
+```solidity
+contract Caller {
+    function callToken(address token, bytes calldata data)
+        external
+        returns (bool ok, bytes memory ret)
+    {
+        (ok, ret) = token.call(data);
+
+        if (!ok) {
+            // ret contains the revert data, if any
+            return (false, ret);
+        }
+
+        return (true, ret);
+    }
+}
+```
+
+In a low-level call, the EVM call failure is represented by `ok == false`. There is no need for a `catch` block because the low-level call itself does not bubble the revert.
+
+## 2. try/catch can miss malformed success return data
+
+This is the most surprising case.
+
+Consider the following interface:
+
+```solidity
+interface IValue {
+    function value() external returns (uint256);
+}
+```
+
+The caller expects the external contract to return a `uint256`:
+
+```solidity
+contract Caller {
+    function read(address target) external returns (uint256) {
+        try IValue(target).value() returns (uint256 x) {
             return x;
         } catch {
             return 999;
@@ -59,14 +127,146 @@ contract Caller {
 }
 ```
 
-Calling `probe(address(new ShortReturner()))` reverts. It does not return `999`. The callee did not revert. It returned successfully with zero bytes. The caller then tried to decode those zero bytes as a `uint256`, and that decode failure happened before the try/catch dispatch point.
-
-This generalizes beyond EOAs. Any target that returns too-short static data, malformed dynamic data, or bad offsets can force the caller to revert through the very `try/catch` that was meant to tolerate failure.
-
-Catch clause dispatch has its own shape. Source order is not first-match order. `catch Error(string)`, `catch Panic(uint256)`, and `catch (bytes memory)` are stored as named clause types in the AST, and codegen prioritizes Error and Panic selectors over the fallback bytes clause regardless of how the clauses were written.
+Now suppose the target returns successfully, but returns no bytes:
 
 ```solidity
-try t.fail() {
+contract EmptyReturn {
+    fallback() external {
+        assembly {
+            return(0, 0)
+        }
+    }
+}
+```
+
+Calling `read(address(new EmptyReturn()))` does not return `999`.
+
+It reverts.
+
+The external call did not fail. It returned success with empty returndata. After the call succeeds, Solidity tries to decode the returned bytes as a `uint256`. Since zero bytes cannot be decoded as a `uint256`, the caller reverts before the `catch` block gets control.
+
+So the `catch` block catches a callee revert, but it does not catch every caller-side decoding failure.
+
+## 3. Calling an EOA can also bypass the catch block
+
+An externally owned account has no code, but a high-level call to an address with no code can still produce a successful low-level call with empty return data.
+
+This matters when the interface expects a return value:
+
+```solidity
+interface IOracle {
+    function latestAnswer() external returns (uint256);
+}
+
+contract PriceReader {
+    function price(address oracle) external returns (uint256) {
+        try IOracle(oracle).latestAnswer() returns (uint256 answer) {
+            return answer;
+        } catch {
+            return 0;
+        }
+    }
+}
+```
+
+If `oracle` is an EOA or another address that returns success with no data, the caller can revert while decoding `answer`. The fallback value `0` is not returned.
+
+This is a common audit issue when a contract assumes `try/catch` makes arbitrary addresses safe to call.
+
+## 4. Dynamic return values can fail in more ways
+
+Malformed return data is not limited to static values like `uint256`.
+
+Dynamic types such as `bytes`, `string`, and arrays include offsets and lengths in their ABI encoding. A malicious target can return data with an invalid offset, a length that points past the end of returndata, or a truncated tail.
+
+```solidity
+interface IMetadata {
+    function metadata() external returns (bytes memory);
+}
+
+contract Reader {
+    function read(address target) external returns (uint256) {
+        try IMetadata(target).metadata() returns (bytes memory data) {
+            return data.length;
+        } catch {
+            return 0;
+        }
+    }
+}
+```
+
+If the call succeeds but the returned bytes are not valid ABI encoding for `bytes`, the caller can revert during return-data decoding. Again, the catch block is skipped.
+
+When the caller needs to tolerate malformed returndata, use a low-level call and validate the bytes manually.
+
+```solidity
+contract Reader {
+    function read(address target) external returns (bool ok, bytes memory data) {
+        (ok, data) = target.call(abi.encodeWithSignature("metadata()"));
+
+        if (!ok) {
+            return (false, data);
+        }
+
+        if (data.length < 32) {
+            return (false, data);
+        }
+
+        // Additional ABI validation is needed before decoding dynamic data.
+        return (true, data);
+    }
+}
+```
+
+The tradeoff is that the caller gives up automatic typed decoding. That is exactly why this approach is safer when the returndata may be hostile.
+
+## 5. try/catch does not catch errors inside the try block
+
+The `catch` block catches the external call failure. It does not catch arbitrary errors in the caller's own logic.
+
+```solidity
+contract Caller {
+    uint256 public total;
+
+    function run(address target) external {
+        try IValue(target).value() returns (uint256 x) {
+            total += x;
+
+            // This revert is not caught by the catch block below.
+            require(x != 13, "bad value");
+        } catch {
+            total = 0;
+        }
+    }
+}
+```
+
+If `target.value()` returns `13`, the `require` inside the success branch reverts the whole transaction. The catch block does not run because the external call succeeded.
+
+The same applies to errors inside the `catch` block itself. A `catch` block is ordinary Solidity code. If it reverts, there is no second catch block around it.
+
+## 6. catch clauses are not ordered like normal if statements
+
+Solidity has three useful catch forms:
+
+```solidity
+catch Error(string memory reason) {
+    // revert("reason") or require(false, "reason")
+}
+
+catch Panic(uint256 code) {
+    // assert failure, arithmetic overflow in checked math, division by zero, etc.
+}
+
+catch (bytes memory data) {
+    // raw revert data
+}
+```
+
+It is tempting to think source order controls which catch block runs. For example:
+
+```solidity
+try target.fail() {
     return 1;
 } catch (bytes memory) {
     return 2;
@@ -75,212 +275,227 @@ try t.fail() {
 }
 ```
 
-If `t.fail()` reverts with `Error("...")`, this returns `3`, not `2`. Putting `catch (bytes)` first does not make `catch Error` unreachable.
+If `target.fail()` reverts with `Error("failed")`, this returns `3`, not `2`.
 
-The reverse surprise also matters: specialized catches are not pattern matching by Solidity error name. A custom error does not match a custom named catch. Solidity only has the built-in Error and Panic catch forms plus the raw bytes fallback. If there is no bytes fallback, many nonmatching payloads are re-raised.
+Solidity dispatches to the typed `Error(string)` and `Panic(uint256)` catch clauses when the revert data matches those built-in formats. The raw `bytes` catch is the fallback for revert payloads that do not match a more specific catch.
 
-The audit model should be:
+The raw bytes catch is broad, but it is not a source-order override.
 
-1. `try` is only available for specific high-level expression kinds.
-2. It catches callee reverts, not every failure around the call expression.
-3. Success-path return decoding can revert before catch dispatch.
-4. `catch (bytes)` is the broad catch for revert payloads, but not for pre-dispatch decode failures.
-5. Catch source order is cosmetic for Error/Panic/bytes priority.
+## 7. catch Error(string) is not a general catch
 
-When you need to tolerate malformed return data, use a low-level call and inspect `ok` and `returndata.length` manually. That gives up typed return decoding, but it moves the boundary to the place you actually need it.
-
-## Where It Goes Wrong
-
-### wrapping a low-level call in `try`
-
-```solidity
-try token.call(data) returns (bool ok, bytes memory ret) {
-    ...
-} catch {
-    ...
-}
-```
-
-This does not compile. The fix is not to remove error handling; the fix is to choose the right boundary. Either use a high-level interface call, or perform the low-level call and inspect `(ok, ret)` yourself.
-
-### assuming `catch` handles malformed success returndata
-
-```solidity
-try oracle.latestAnswer() returns (uint256 price) {
-    return price;
-} catch {
-    return fallbackPrice;
-}
-```
-
-If the oracle address returns success with empty or malformed data, the return decoder can revert before the catch dispatch. The fallback is skipped.
-
-### successful EOAs with expected return values
-
-```solidity
-interface I {
-    function value() external returns (uint256);
-}
-
-function read(address target) external returns (uint256) {
-    try I(target).value() returns (uint256 x) {
-        return x;
-    } catch {
-        return 0;
-    }
-}
-```
-
-Calling an EOA can produce a successful low-level CALL with no returndata. Because the caller expects a `uint256`, the decode can fail before the catch. This is one of the nastier cases because the target did not revert and may not even contain code.
-
-### dynamic return values with malicious offsets
-
-```solidity
-interface I {
-    function metadata() external returns (bytes memory);
-}
-
-try I(target).metadata() returns (bytes memory data) {
-    return data.length;
-} catch {
-    return 0;
-}
-```
-
-A target can return success with a malformed ABI payload: an offset outside the returned buffer, a short tail, or a length that points past the end. The dynamic decoder fails before catch dispatch just like the static short-return case.
-
-### catching only `Error(string)`
+This catches only the built-in Solidity error format for reason strings:
 
 ```solidity
 try target.f() {
-    ...
+    // ...
 } catch Error(string memory reason) {
     emit Failed(reason);
 }
 ```
 
-This misses panics, custom errors, bare reverts, malformed Error payloads, and unknown selectors. If the caller should continue for all callee reverts, include `catch (bytes memory data)`.
+It does not catch:
 
-### truncated `Error` or `Panic` payloads
+1. `Panic(uint256)` errors
+2. Custom errors
+3. `revert()` with no data
+4. Assembly reverts with arbitrary bytes
+5. Malformed `Error(string)` payloads
+
+If the caller should continue after any callee revert, include a raw bytes catch:
 
 ```solidity
 try target.f() {
-    ...
+    // ...
 } catch Error(string memory reason) {
-    emit Reason(reason);
+    emit FailedWithReason(reason);
 } catch Panic(uint256 code) {
-    emit PanicCode(code);
-} catch (bytes memory raw) {
-    emit Raw(raw);
+    emit FailedWithPanic(code);
+} catch (bytes memory data) {
+    emit FailedWithBytes(data);
 }
 ```
 
-The selector alone is not enough. If revert data starts with the Error selector but is too short to decode a string, the Error clause does not run. The same applies to a truncated Panic payload. These malformed payloads fall through to `catch (bytes)` if it exists; otherwise they can be re-raised.
+The final `catch (bytes memory data)` is the broad catch for revert data. It still does not catch successful malformed return data from the success path described earlier.
 
-### expecting `catch (bytes)` source order to shadow typed catches
+## 8. Custom errors are caught as bytes
 
-```solidity
-try target.f() {
-    ...
-} catch (bytes memory) {
-    return 1;
-} catch Panic(uint256) {
-    return 2;
-}
-```
+Solidity custom errors are ABI-encoded revert data. They are not catchable by name.
 
-For a Panic payload this returns `2`, not `1`. Solidity dispatches by clause kind, not by source order.
-
-### treating custom errors as catchable by name
+This does not compile:
 
 ```solidity
 error NotAllowed(address user);
 
 try target.f() {
-    ...
+    // ...
 } catch NotAllowed(address user) {
-    ...
+    // ...
 }
 ```
 
-Solidity does not support this catch form. Custom errors are handled through `catch (bytes)` and decoded manually if needed.
-
-### using `try this.internalWrapper()` to catch internal failures
+To handle custom errors, catch the raw bytes and decode them carefully:
 
 ```solidity
-function wrapper() external {
-    _doWork();
-}
+error NotAllowed(address user);
 
-function run() external {
-    try this.wrapper() {
-        ...
-    } catch {
-        ...
+bytes4 constant NOT_ALLOWED_SELECTOR = NotAllowed.selector;
+
+try target.f() {
+    // ...
+} catch (bytes memory data) {
+    if (data.length >= 4 && bytes4(data) == NOT_ALLOWED_SELECTOR) {
+        // Decode only after validating the expected length and format.
     }
 }
 ```
 
-This turns an internal call into an external call to self. That changes `msg.sender`, gas behavior, reentrancy shape, visibility, and construction-time behavior. It may catch the revert, but it is not semantically equivalent to catching an internal function.
+The selector is only the first four bytes. Before decoding arguments, the contract must check that the payload has the expected length and structure.
 
-### catching a wrapper instead of the operation you care about
+## 9. Decoding catch bytes can revert too
 
-```solidity
-function safeCall(address target, bytes calldata data)
-    external
-    returns (bool ok, bytes memory ret)
-{
-    return target.call(data);
-}
+The raw bytes in a catch block are untrusted input. A malicious callee can return any revert payload it wants.
 
-try this.safeCall(target, data) returns (bool ok, bytes memory ret) {
-    require(ok, "call failed");
-} catch {
-    ...
-}
-```
-
-This compiles because `this.safeCall` is a high-level external call. But the low-level failure is now encoded as `ok == false`, not as a caught revert. The catch only handles the wrapper itself reverting or failing to return valid data.
-
-### relying on constructor `try/catch` as a deployment firewall
-
-```solidity
-try new Child(arg) returns (Child child) {
-    children.push(child);
-} catch {
-    children.push(defaultChild);
-}
-```
-
-This catches constructor reverts, but it does not make all creation failures equal. ABI encoding of constructor args, value transfer constraints, code-size issues, and downstream malformed data can still surprise the caller.
-
-### assuming a catch block makes state changes atomic
-
-```solidity
-reserved[id] = true;
-try minter.mint(id) {
-    ownerOf[id] = msg.sender;
-} catch {
-    emit MintSkipped(id);
-}
-```
-
-If `mint` fails and the catch continues, the pre-call state remains changed unless you undo it. `try/catch` is control flow, not a transaction-local rollback boundary for the caller's own writes.
-
-### decoding raw catch bytes unsafely
+This is unsafe:
 
 ```solidity
 try target.f() {
-    ...
+    // ...
 } catch (bytes memory data) {
-    bytes4 selector = bytes4(data);
-    if (selector == 0x08c379a0) {
-        string memory reason = abi.decode(data[4:], (string));
-        emit Failed(reason);
+    string memory reason = abi.decode(data[4:], (string));
+    emit Failed(reason);
+}
+```
+
+The code assumes:
+
+1. `data` has at least 4 bytes
+2. The first 4 bytes are the selector for `Error(string)`
+3. The remaining bytes are valid ABI encoding for a string
+
+If any of those assumptions are false, the catch block can revert.
+
+A safer version checks the selector and length first:
+
+```solidity
+bytes4 constant ERROR_SELECTOR = bytes4(keccak256("Error(string)"));
+
+try target.f() {
+    // ...
+} catch (bytes memory data) {
+    if (data.length >= 4 && bytes4(data) == ERROR_SELECTOR) {
+        // More validation is needed before decoding a dynamic string.
+    }
+
+    emit FailedRaw(data);
+}
+```
+
+In most contracts, emitting or storing the raw bytes is safer than decoding every possible format on-chain.
+
+## 10. try this.wrapper() changes the call
+
+Developers sometimes try to catch internal failures by moving the logic into an external function and calling `this`.
+
+```solidity
+contract Worker {
+    function wrapper() external {
+        _doWork();
+    }
+
+    function run() external {
+        try this.wrapper() {
+            // ...
+        } catch {
+            // ...
+        }
+    }
+
+    function _doWork() internal {
+        // ...
     }
 }
 ```
 
-This can revert inside the catch if `data` is shorter than four bytes or has an Error selector with malformed payload. A robust raw catch treats the bytes as hostile input and length-checks before decoding.
+This can catch a revert from `wrapper()`, but it is not the same as calling `_doWork()` internally.
 
-The useful way to think about `try/catch` is not "exception handling for Solidity". It is "typed external-call revert dispatch, after some compiler-selected work has already happened". Once you hold that model, the odd cases stop being odd: low-level calls are outside the allowlist, successful malformed returndata is too early for the catch, and custom errors are just bytes unless you decode them.
+The call to `this.wrapper()` is an external call to the same contract. That changes the execution context:
+
+1. `msg.sender` becomes the contract itself
+2. The call goes through external ABI encoding and decoding
+3. Reentrancy assumptions can change
+4. Gas behavior can change
+5. The pattern does not work the same way during construction
+
+This pattern should be treated as an external self-call, not as a harmless internal try/catch.
+
+## 11. try/catch is not a rollback boundary for the caller
+
+The external call may revert and get caught, but state changes made by the caller before the external call are not automatically undone.
+
+```solidity
+contract Minter {
+    mapping(uint256 => bool) public reserved;
+
+    function mint(address target, uint256 id) external {
+        reserved[id] = true;
+
+        try ITarget(target).mint() returns (uint256) {
+            // mint succeeded
+        } catch {
+            // mint failed, but reserved[id] is still true
+        }
+    }
+}
+```
+
+If the catch block continues, `reserved[id]` remains `true`. The caller must explicitly undo or account for its own state changes.
+
+`try/catch` is control flow. It is not a transaction-local checkpoint.
+
+## 12. Constructor try/catch has the same limitations
+
+Solidity allows `try/catch` around contract creation:
+
+```solidity
+contract Factory {
+    Child public child;
+
+    function deploy(uint256 arg) external {
+        try new Child(arg) returns (Child deployed) {
+            child = deployed;
+        } catch {
+            // deployment failed
+        }
+    }
+}
+```
+
+This can catch a revert from the child constructor.
+
+However, it should not be treated as a complete deployment firewall. The caller can still run into issues around argument encoding, value transfer constraints, code-size limits, and caller-side logic in the success or catch branches.
+
+The same rule applies: only the failure at the allowed external operation is caught.
+
+## Audit checklist
+
+When reviewing Solidity `try/catch`, ask the following questions:
+
+1. Is the expression inside `try` actually a high-level external call or contract creation?
+2. Does the code assume low-level calls can be wrapped in `try/catch`?
+3. Does the interface expect return values from an arbitrary or untrusted address?
+4. Can a successful call return empty or malformed returndata?
+5. Does the code catch only `Error(string)` when it should also handle panics, custom errors, or raw revert data?
+6. Does the catch block decode raw bytes without validating length and selector?
+7. Does the contract assume `catch (bytes)` catches malformed success return data?
+8. Does `try this.someFunction()` accidentally change `msg.sender` or reentrancy assumptions?
+9. Are caller-side state changes before the external call still correct if the catch block continues?
+
+## Conclusion
+
+The best way to think about Solidity `try/catch` is:
+
+`try/catch` catches certain external call reverts. It is not a general failure boundary.
+
+If the callee reverts, a matching catch block can handle the revert data. If the callee returns success with malformed returndata, the caller can still revert during ABI decoding. If the caller's own code reverts inside the success or catch block, that revert is not caught either.
+
+For trusted interfaces, high-level `try/catch` is convenient. For hostile or arbitrary targets, especially when return data matters, a low-level call with explicit returndata validation is usually the more accurate boundary.
